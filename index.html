@@ -18,8 +18,8 @@
   --border: rgba(255,255,255,0.08);
   --border-strong: rgba(255,255,255,0.14);
   --text: #ededf0;
-  --text-2: #9a9aa5;
-  --text-3: #5c5c66;
+  --text-2: #a6a6b3;
+  --text-3: #70707c;
   --accent: #2e7cd6;
   --accent-glow: rgba(46,124,214,0.35);
   --green: #3ecf8e;
@@ -123,7 +123,7 @@ h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
 .col-dot { width:8px; height:8px; border-radius:50%; }
 .col-title { font-size: 13px; font-weight: 600; color: var(--text-2); }
 .col-count { font-size: 12px; color: var(--text-3); }
-.col-body { display:flex; flex-direction:column; gap:10px; min-height: 300px; border-radius: var(--radius); transition: background .15s; padding: 2px; }
+.col-body { display:flex; flex-direction:column; gap:10px; min-height: 300px; border-radius: 12px; transition: background .15s; padding: 8px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.04); }
 .col-body.dragover { background: rgba(46,124,214,0.06); outline: 1px dashed rgba(46,124,214,0.4); }
 .card {
   background: var(--bg-3); border: 1px solid var(--border); border-radius: var(--radius);
@@ -132,7 +132,11 @@ h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
 .card:hover { border-color: var(--border-strong); transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0,0,0,0.35); }
 .card:active { cursor: grabbing; }
 .card.dragging { opacity: .4; }
-.card-title { font-size: 13.5px; line-height: 1.45; font-weight: 500; }
+.card-title { font-size: 14px; line-height: 1.5; font-weight: 600; }
+.card-desc {
+  font-size: 12px; color: var(--text-3); margin-top: 5px; line-height: 1.55;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
 .card-foot { display:flex; align-items:center; justify-content:space-between; margin-top: 12px; gap: 8px; flex-wrap: wrap; }
 .card-x {
   background:none; border:none; color: var(--text-3); cursor:pointer;
@@ -574,14 +578,16 @@ mark { background: rgba(46,124,214,0.35); color: #cde4fa; border-radius: 3px; pa
 <!-- Task modal -->
 <div class="overlay" id="taskModal">
   <div class="modal">
-    <h3>新規タスク</h3>
+    <h3 id="taskModalTitle">新規タスク</h3>
     <div class="field"><label>タスク名</label><input id="taskTitleInput" placeholder="何をする？"></div>
     <div class="field"><label>担当者</label><select id="taskAssigneeInput"></select></div>
     <div class="field"><label>優先度</label>
       <select id="taskPriorityInput"><option value="低">低</option><option value="中" selected>中</option><option value="高">高</option></select>
     </div>
     <div class="field"><label>期限</label><input type="date" id="taskDueInput"></div>
+    <div class="field"><label>詳細（任意）</label><textarea id="taskDescInput" placeholder="補足・手順・リンクなど"></textarea></div>
     <div class="modal-actions">
+      <button class="btn btn-ghost left" id="taskDeleteBtn" style="display:none; color:#ff8080;">削除</button>
       <button class="btn btn-ghost" id="taskCancelBtn">キャンセル</button>
       <button class="btn btn-primary" id="taskSaveBtn">作成</button>
     </div>
@@ -775,6 +781,7 @@ function renderBoard() {
           return `<div class="card" draggable="true" data-id="${t.id}">
             <button class="card-x" data-id="${t.id}">✕</button>
             <div class="card-title">${esc(t.title)}</div>
+            ${t.description ? `<div class="card-desc">${esc(t.description)}</div>` : ''}
             <div class="card-foot">
               <span class="assignee">${avatar(t.assignee)}${esc(t.assignee)}</span>
               <span style="display:flex;gap:6px;align-items:center;">
@@ -791,6 +798,10 @@ function renderBoard() {
   el.querySelectorAll('.card').forEach(card => {
     card.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', card.dataset.id); card.classList.add('dragging'); });
     card.addEventListener('dragend', () => card.classList.remove('dragging'));
+    card.addEventListener('click', e => {
+      if (e.target.classList.contains('card-x')) return;
+      openTaskModal(card.dataset.id);
+    });
   });
   el.querySelectorAll('.col-body').forEach(zone => {
     zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
@@ -816,27 +827,51 @@ function renderBoard() {
 renderers.board = renderBoard;
 
 const taskModal = document.getElementById('taskModal');
-document.getElementById('addTaskBtn').addEventListener('click', () => {
-  document.getElementById('taskAssigneeInput').innerHTML =
-    state.members.map(m=>`<option ${m.name===state.currentUser?'selected':''}>${esc(m.name)}</option>`).join('');
-  document.getElementById('taskTitleInput').value = '';
-  document.getElementById('taskDueInput').value = '';
+let editingTaskId = null;
+function openTaskModal(id) {
+  editingTaskId = id || null;
+  const t = id ? state.tasks.find(x => x.id === id) : null;
+  document.getElementById('taskModalTitle').textContent = t ? 'タスク編集' : '新規タスク';
+  document.getElementById('taskSaveBtn').textContent = t ? '保存' : '作成';
+  document.getElementById('taskDeleteBtn').style.display = t ? 'block' : 'none';
+  const assigneeSel = document.getElementById('taskAssigneeInput');
+  const defAssignee = t ? t.assignee : state.currentUser;
+  assigneeSel.innerHTML = state.members.map(m=>`<option ${m.name===defAssignee?'selected':''}>${esc(m.name)}</option>`).join('');
+  document.getElementById('taskTitleInput').value = t ? t.title : '';
+  document.getElementById('taskPriorityInput').value = t ? t.priority : '中';
+  document.getElementById('taskDueInput').value = t && t.due ? t.due : '';
+  document.getElementById('taskDescInput').value = t ? (t.description || '') : '';
   taskModal.classList.add('open');
   document.getElementById('taskTitleInput').focus();
-});
+}
+document.getElementById('addTaskBtn').addEventListener('click', () => openTaskModal(null));
 document.getElementById('taskCancelBtn').addEventListener('click', () => taskModal.classList.remove('open'));
 document.getElementById('taskSaveBtn').addEventListener('click', saveTask);
 document.getElementById('taskTitleInput').addEventListener('keydown', e => { if (e.key==='Enter') saveTask(); });
+document.getElementById('taskDeleteBtn').addEventListener('click', async () => {
+  if (!editingTaskId) return;
+  const t = state.tasks.find(x => x.id === editingTaskId);
+  if (!t || !confirm(`「${t.title}」を削除しますか？`)) return;
+  taskModal.classList.remove('open');
+  state.tasks = state.tasks.filter(x => x.id !== editingTaskId);
+  renderBoard(); updateCounts();
+  const { error } = await sb.from('tasks').delete().eq('id', editingTaskId);
+  if (error) err(error);
+});
 async function saveTask() {
   const title = document.getElementById('taskTitleInput').value.trim();
   if (!title) return;
   taskModal.classList.remove('open');
-  const { error } = await sb.from('tasks').insert({
-    title, status: 'todo',
+  const data = {
+    title,
     assignee: document.getElementById('taskAssigneeInput').value,
     priority: document.getElementById('taskPriorityInput').value,
     due: document.getElementById('taskDueInput').value || null,
-  });
+    description: document.getElementById('taskDescInput').value.trim(),
+  };
+  const { error } = editingTaskId
+    ? await sb.from('tasks').update(data).eq('id', editingTaskId)
+    : await sb.from('tasks').insert({ ...data, status: 'todo' });
   if (error) return err(error);
   await fetchTable('tasks'); renderBoard(); updateCounts();
 }
